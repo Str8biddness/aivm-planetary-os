@@ -140,31 +140,58 @@ async function sendChatMessage() {
 function handleChatKey(event) { if(event.key === 'Enter') sendChatMessage(); }
 
 // ==========================================
-// TERMINAL IPC
+// TERMINAL IPC & HIERARCHY APPROVAL
 // ==========================================
+let pendingAdminApprovalCommand = null;
+
 async function handleTerminalKey(event) {
     if (event.key === 'Enter') {
         const input = document.getElementById('terminal-input');
-        const cmd = input.value.trim();
+        const rawInput = input.value.trim();
         const outputDiv = document.getElementById('terminal-output');
         
-        outputDiv.innerHTML += `<div>root@planetary-os:~# ${cmd}</div>`;
+        outputDiv.innerHTML += `<div>root@planetary-os:~# ${rawInput}</div>`;
         input.value = '';
         outputDiv.scrollTop = outputDiv.scrollHeight;
         
-        if (!cmd) return;
+        if (!rawInput) return;
+        
+        // Handle "yes/no" responses to Synthesus queries
+        let cmdToRun = rawInput;
+        let isOverride = false;
+        
+        if (pendingAdminApprovalCommand) {
+            if (rawInput.toLowerCase() === 'yes' || rawInput.toLowerCase() === 'y') {
+                cmdToRun = pendingAdminApprovalCommand;
+                isOverride = true;
+                outputDiv.innerHTML += `<div style="color: #facc15;">[SYNTHESUS] Authorization accepted. Executing substrate modification...</div>`;
+            } else {
+                outputDiv.innerHTML += `<div style="color: #ef4444;">[SYNTHESUS] Authorization denied. Command aborted to preserve hierarchy.</div>`;
+                pendingAdminApprovalCommand = null;
+                outputDiv.scrollTop = outputDiv.scrollHeight;
+                return;
+            }
+            pendingAdminApprovalCommand = null;
+        }
         
         try {
             const response = await fetch('http://127.0.0.1:8080/api/terminal/run', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ command: cmd })
+                body: JSON.stringify({ command: cmdToRun, admin_override: isOverride })
             });
             const data = await response.json();
-            const pre = document.createElement('pre');
-            pre.textContent = data.output;
-            pre.style.margin = "0";
-            pre.style.whiteSpace = "pre-wrap";
-            outputDiv.appendChild(pre);
+            
+            if (data.status === "requires_approval") {
+                // Synthesus intercepted the command and is actively querying the Admin
+                pendingAdminApprovalCommand = data.pending_command;
+                outputDiv.innerHTML += `<br><div style="color: #ef4444; border-left: 3px solid #ef4444; padding-left: 10px; margin: 10px 0;"><strong>[SYNTHESUS INQUIRY]</strong><br>${data.synthesus_query}<br><span style="color: #94a3b8;">(Type 'yes' to authorize, or 'no' to abort)</span></div><br>`;
+            } else {
+                const pre = document.createElement('pre');
+                pre.textContent = data.output;
+                pre.style.margin = "0";
+                pre.style.whiteSpace = "pre-wrap";
+                outputDiv.appendChild(pre);
+            }
             outputDiv.scrollTop = outputDiv.scrollHeight;
         } catch(err) {
             outputDiv.innerHTML += `<div style="color: red;">Error connecting to subsystem.</div>`;

@@ -103,6 +103,24 @@ def list_files():
 def run_command():
     data = request.json
     cmd = data.get('command', '')
+    override = data.get('admin_override', False)
+    
+    # -------------------------------------------------------------
+    # SYNTHESUS HIERARCHY APPROVAL PROTOCOL
+    # The AI actively evaluates the command before execution.
+    # -------------------------------------------------------------
+    high_risk_keywords = ['rm', 'sudo', 'chmod', 'chown', 'mkfs', 'dd', 'apt', 'dpkg', 'mv', 'reboot', 'shutdown']
+    cmd_parts = cmd.lower().split()
+    
+    if any(keyword in cmd_parts for keyword in high_risk_keywords) and not override:
+        # Instead of executing, Synthesus actively queries the Admin
+        synthesus_query = f"Admin Dakin, you requested to execute a substrate-level modification: '{cmd}'. This alters the host OS hierarchy. Do I have your explicit authorization to proceed?"
+        return jsonify({
+            "status": "requires_approval",
+            "synthesus_query": synthesus_query,
+            "pending_command": cmd
+        })
+        
     try:
         # Route the shell command to the Host OS backend
         output = subprocess.check_output(cmd, shell=True, stderr=subprocess.STDOUT, text=True, timeout=5)
@@ -110,7 +128,8 @@ def run_command():
         output = e.output
     except Exception as e:
         output = str(e)
-    return jsonify({"output": output})
+        
+    return jsonify({"status": "success", "output": output})
 
 # ===================================================================
 # LAUNCHER
@@ -125,5 +144,5 @@ if __name__ == '__main__':
     time.sleep(1)
     
     print("[*] Hooking into Host OS via PyWebView (Frameless Mode)...")
-    webview.create_window('Synthesus Planetary OS', 'http://127.0.0.1:8080', frameless=True, fullscreen=True)
+    webview.create_window('Synthesus Planetary OS', 'http://127.0.0.1:8080', frameless=True, fullscreen=True, text_select=True)
     webview.start()
